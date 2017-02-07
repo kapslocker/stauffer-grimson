@@ -4,15 +4,22 @@
 #include <algorithm>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/imgproc.hpp"
+#include "opencv2/videoio.hpp"
+#include <opencv2/highgui.hpp>
+#include <opencv2/video.hpp>
 
 using namespace cv;
 using namespace std;
+
 
 
 /**
 *  @params dir, frames
 *  Fill vector frames with file names of images from directory dir.
 */
+/*
 void getframes(string dir, vector<string> &frames){
   DIR *dp;
   struct dirent *dirp;
@@ -24,6 +31,8 @@ void getframes(string dir, vector<string> &frames){
   closedir(dp);
   return;
 }
+*/
+
 /*
 * Contains parameters for the program
 */
@@ -52,11 +61,11 @@ class Params{
 }params;
 
 
-vector<vector<vector<Vec3b> > > mu,covar;                                       // Mean and Covariance for each Gaussian at pixel (x,y).
-vector<vector<vector<Vec3b> > > pr;                                               // Each Gaussian's contribution to the mixture at pixel (x,y)
+//paramaters of the gaussians, 3 for each pixel
+vector<vector<vector<Vec3b> > > mu,covar;                  // Mean and Covariance for each Gaussian at pixel (x,y).
+vector<vector<vector<Vec3b> > > pr;                        // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 void initialiseVec(){
-
   for(int i=0;i<params.getRows();i++){
     mu.push_back(vector<vector<Vec3b> >());
     covar.push_back(vector<vector<Vec3b> >());
@@ -69,9 +78,72 @@ void initialiseVec(){
     }
   }
 }
+
+VideoCapture processVideo(char* fileName){
+  VideoCapture capture(fileName);
+    if(!capture.isOpened()){
+        //error in opening the video input
+        cerr << "Unable to open video file: " << fileName << endl;
+        exit(EXIT_FAILURE);
+    }
+
+    return capture;
+}
+
+// Global variables
+Mat frame; //current frame
+
+char keyboard; //input from keyboard
+
+
 int main(int argc, char** argv ){
 
+  VideoCapture capture = processVideo("video/umcp.mpg");
 
+    keyboard = 0;
+
+  initialiseVec();
+  params.initParams(frame.size().width,frame.size().height);
+
+    // the main while loop inside which the video processing happens
+    while( keyboard != 'q' && keyboard != 27 ){
+        //read the current frame
+        if(!capture.read(frame)) {
+            cerr << "Unable to read next frame." << endl;
+            cerr << "Exiting..." << endl;
+            exit(EXIT_FAILURE);
+        }
+
+        //PROCESS HERE
+        
+        //Expectation step -- maximize pr based off values of pixel
+
+        //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
+
+
+
+        //The output area -- output video and whatever else we want
+        //get the frame number and write it on the current frame
+        stringstream ss;
+        rectangle(frame, cv::Point(10, 2), cv::Point(100,20),
+                  cv::Scalar(255,255,255), -1);
+        ss << capture.get(CAP_PROP_POS_FRAMES);
+        string frameNumberString = ss.str();
+        putText(frame, frameNumberString.c_str(), cv::Point(15, 15),
+                FONT_HERSHEY_SIMPLEX, 0.5 , cv::Scalar(0,0,0));
+        //show the current frame and the fg masks
+        imshow("Frame", frame);
+
+        //get the input from the keyboard
+        keyboard = (char)waitKey( 30 );
+    }
+
+
+    //delete capture object
+    capture.release();
+
+
+/*
   Mat src;                                                                      // Each frame.
   int framecount = 0;                                                           // For process end.
   vector<string> frames;                                                        // name of each frame.
@@ -104,5 +176,7 @@ int main(int argc, char** argv ){
   }
   imshow("",src);
   waitKey(0);
+
+  */
   return 0;
 }

@@ -2,6 +2,7 @@
 #include <dirent.h>                 // for detecting frames
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include "opencv2/imgcodecs.hpp"
@@ -13,7 +14,7 @@
 using namespace cv;
 using namespace std;
 
-
+const double PI = 4*atan(1);
 
 /**
 *  @params dir, frames
@@ -58,12 +59,11 @@ class Params{
     int maxModes(){
         return K;
     }
+    float learning_rate(){
+        return alpha;
+    }
 }params;
 
-
-//paramaters of the gaussians, 3 for each pixel
-vector<vector<vector<Vec3b> > > mu,covar;                  // Mean and Covariance for each Gaussian at pixel (x,y).
-vector<vector<vector<Vec3b> > > pr;                        // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 void initialiseVec(){
      for(int i=0;i<params.getRows();i++){
@@ -85,7 +85,7 @@ VideoCapture processVideo(char* fileName){
             //error in opening the video input
             cerr << "Unable to open video file: " << fileName << endl;
             exit(EXIT_FAILURE);
-        }   
+        }
 
     return capture;
 }
@@ -95,6 +95,50 @@ Mat frame; //current frame
 
 char keyboard; //input from keyboard
 
+
+/*
+* Evaluates the Gaussian, with covariance matrix as simply sig_squared * I .
+*/
+double eval_gaussian(Vec3b &X, Vec3b &u, double sig_squared){
+    double s = 0;
+    for(int i=0;i<2;i++){
+        s += pow((X.val[i] - u.val[i]),2);
+    }
+    return pow(( pow((1/2*PI),3), sig_squared ),0.5) * exp(-0.5 * s );
+}
+
+/*
+*   w           -> a double array of size K, the array of weights for each Gaussian for each pixel.
+*   X           -> value observed at time t.
+*   u           -> double array of size K, the array containing means for each Gaussian for each pixel.
+*   sig_squared -> double array of size K, containing the covariance for each Gaussian for each pixel.
+*/
+double eval_expectation(double *w, Vec3b &X, Vec3b *u, double *sig_squared){
+    double sum = 0;
+    for(int i=0;i<params.maxModes();i++){
+        sum += w[i]*eval_gaussian(X, u[i], sig_squared[i]);
+    }
+    return sum;
+}
+
+/*
+* Updates the value of mu, sig_squared for a specific distribution
+* for the given pixel at time t
+*/
+void update_gaussian(Vec3b X, Vec3b &u, double &sig_squared){
+
+    double p = params.learning_rate() * eval_gaussian(X, u, sig_squared);
+
+    u = (1-p)*u + p*X;
+    sig_squared = (1-p)*sig_squared + norm(X - u);
+
+}
+
+
+
+//paramaters of the gaussians, 3 for each pixel
+vector<vector<vector<Vec3b> > > mu,covar;                  // Mean and Covariance for each Gaussian at pixel (x,y).
+vector<vector<vector<Vec3b> > > pr;                        // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 int main(int argc, char** argv ){
 
@@ -121,24 +165,26 @@ int main(int argc, char** argv ){
         {
             for (int y = 0; y < params.getRows(); ++y)
             {
-                Vec3b intensity = frame.at<Vec3b>(y,x);
-                
+                Vec3b intensity = frame.at<Vec3b>(y,x);                         // i.e. X(t)
+
                 /*  To read the color values use below code
                 uchar blue = intensity.val[0];
                 uchar green = intensity.val[1];
                 uchar red = intensity.val[2];
                 */
 
+
             //Expectation step -- maximize pr based off values of pixel
+
 
             //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
 
 
             }
         }
-        
 
-        
+
+
 
 
         //The output area -- output video and whatever else we want

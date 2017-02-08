@@ -41,22 +41,22 @@ class Params{
     int height;
     int K;
     float alpha, T;
-  public:
-    void initParams(int w, int h){
-      width = w;
-      height = h;
-      K = 3;
-      alpha = 0.3f;
-      T = 0.75f;
+    public:
+        void initParams(int w, int h){
+        width = w;
+        height = h;
+        K = 3;
+        alpha = 0.3f;
+        T = 0.75f;
     }
     int getCols(){
-      return width;
+        return width;
     }
     int getRows(){
-      return height;
+        return height;
     }
     int maxModes(){
-      return K;
+        return K;
     }
 }params;
 
@@ -66,26 +66,26 @@ vector<vector<vector<Vec3b> > > mu,covar;                  // Mean and Covarianc
 vector<vector<vector<Vec3b> > > pr;                        // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 void initialiseVec(){
-  for(int i=0;i<params.getRows();i++){
-    mu.push_back(vector<vector<Vec3b> >());
-    covar.push_back(vector<vector<Vec3b> >());
-    pr.push_back(vector<vector<Vec3b> >());
+     for(int i=0;i<params.getRows();i++){
+        mu.push_back(vector<vector<Vec3b> >());
+        covar.push_back(vector<vector<Vec3b> >());
+        pr.push_back(vector<vector<Vec3b> >());
 
-    for(int j=0;j<params.getCols();j++){
-      mu[i].push_back(vector<Vec3b>());
-      covar[i].push_back(vector<Vec3b>());
-      pr[i].push_back(vector<Vec3b>());
+        for(int j=0;j<params.getCols();j++){
+            mu[i].push_back(vector<Vec3b>());
+            covar[i].push_back(vector<Vec3b>());
+            pr[i].push_back(vector<Vec3b>());
+        }
     }
-  }
 }
 
 VideoCapture processVideo(char* fileName){
-  VideoCapture capture(fileName);
-    if(!capture.isOpened()){
-        //error in opening the video input
-        cerr << "Unable to open video file: " << fileName << endl;
-        exit(EXIT_FAILURE);
-    }
+    VideoCapture capture(fileName);
+        if(!capture.isOpened()){
+            //error in opening the video input
+            cerr << "Unable to open video file: " << fileName << endl;
+            exit(EXIT_FAILURE);
+        }   
 
     return capture;
 }
@@ -98,12 +98,12 @@ char keyboard; //input from keyboard
 
 int main(int argc, char** argv ){
 
-  VideoCapture capture = processVideo("video/umcp.mpg");
+    VideoCapture capture = processVideo("video/umcp.mpg");
 
     keyboard = 0;
 
-  initialiseVec();
-  params.initParams(frame.size().width,frame.size().height);
+    initialiseVec();
+    params.initParams(frame.size().width,frame.size().height);
 
     // the main while loop inside which the video processing happens
     while( keyboard != 'q' && keyboard != 27 ){
@@ -115,11 +115,30 @@ int main(int argc, char** argv ){
         }
 
         //PROCESS HERE
+
+        //For each Pixel -- Do the EM steps
+        for (int x = 0; x < params.getCols(); ++x)
+        {
+            for (int y = 0; y < params.getRows(); ++y)
+            {
+                Vec3b intensity = frame.at<Vec3b>(y,x);
+                
+                /*  To read the color values use below code
+                uchar blue = intensity.val[0];
+                uchar green = intensity.val[1];
+                uchar red = intensity.val[2];
+                */
+
+            //Expectation step -- maximize pr based off values of pixel
+
+            //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
+
+
+            }
+        }
         
-        //Expectation step -- maximize pr based off values of pixel
 
-        //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
-
+        
 
 
         //The output area -- output video and whatever else we want

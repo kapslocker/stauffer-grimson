@@ -62,19 +62,39 @@ class Params{
     float learning_rate(){
         return alpha;
     }
+    double init_covar(){                                                        // high initial covariance for a new distribution
+        return 100;
+    }
+    double init_prior(){                                                        // low initial prior weight for a new distribution
+        return alpha*0.1;
+    }
 }params;
 
+
+//parameters of the gaussians, 3 for each pixel
+vector<vector<vector<Vec3b> > > mu;
+vector<vector<vector<double> > >covar;                                          // Mean and Covariance for each Gaussian at pixel (x,y).
+vector<vector<vector<double> > > pr;                                       // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 void initialiseVec(){
      for(int i=0;i<params.getRows();i++){
         mu.push_back(vector<vector<Vec3b> >());
-        covar.push_back(vector<vector<Vec3b> >());
-        pr.push_back(vector<vector<Vec3b> >());
+        covar.push_back(vector<vector<double> >());
+        pr.push_back(vector<vector<double> >());
 
         for(int j=0;j<params.getCols();j++){
             mu[i].push_back(vector<Vec3b>());
-            covar[i].push_back(vector<Vec3b>());
-            pr[i].push_back(vector<Vec3b>());
+            covar[i].push_back(vector<double>());
+            pr[i].push_back(vector<double>());
+
+            mu[i][j].resize(params.maxModes());
+            covar[i][j].resize(params.maxModes());
+            pr[i][j].resize(params.maxModes());
+            for(int k = 0;k<params.maxModes();k++){
+                mu[i][j][k] = Vec3b(0,0,0);
+                covar[i][j][k] = params.init_covar();
+                pr[i][j][k]    = params.init_prior();
+            }
         }
     }
 }
@@ -101,10 +121,10 @@ char keyboard; //input from keyboard
 */
 double eval_gaussian(Vec3b &X, Vec3b &u, double sig_squared){
     double s = 0;
-    for(int i=0;i<2;i++){
+    for(int i=0;i<3;i++){
         s += pow((X.val[i] - u.val[i]),2);
     }
-    return pow(( pow((1/2*PI),3), sig_squared ),0.5) * exp(-0.5 * s );
+    return exp(-0.5 * s/sig_squared )/sqrt(pow(2*PI,3)*sig_squared);
 }
 
 /*
@@ -125,32 +145,52 @@ double eval_expectation(double *w, Vec3b &X, Vec3b *u, double *sig_squared){
 * Updates the value of mu, sig_squared for a specific distribution
 * for the given pixel at time t
 */
-void update_gaussian(Vec3b X, Vec3b &u, double &sig_squared){
+//void update_gaussian(Vec3b X, Vec3b &u, double &sig_squared){
+void update_gaussian(Vec3b X, int row, int col, int k){
+    if(row == 50 and col == 50)
+        cout<<"here"<<endl;
+    Vec3b u = mu[row][col][k];
 
+    double sig_squared = covar[row][col][k];
+
+    if(sig_squared == 0){
+        sig_squared = 100;
+    }
     double p = params.learning_rate() * eval_gaussian(X, u, sig_squared);
-
+    if(row==50 and col==50){
+//        cout<<p<<endl;
+    }
     u = (1-p)*u + p*X;
-    sig_squared = (1-p)*sig_squared + norm(X - u);
+    sig_squared = (1-p)*sig_squared + pow(norm(X - u),2);
+
+    mu[row][col][k] = u;
+    covar[row][col][k] = sig_squared;
+    pr[row][col][k] = (1-params.learning_rate())*pr[row][col][k] + params.learning_rate();
 
 }
 
-
-
-//paramaters of the gaussians, 3 for each pixel
-vector<vector<vector<Vec3b> > > mu,covar;                  // Mean and Covariance for each Gaussian at pixel (x,y).
-vector<vector<vector<Vec3b> > > pr;                        // Each Gaussian's contribution to the mixture at pixel (x,y)
-
+void replace_gaussian(Vec3b X, int row, int col, int k){
+    if(row == 50 and col == 50)
+        cout<<"Changed\n";
+    mu[row][col][k] = X;
+    covar[row][col][k] = params.init_covar();
+    pr[row][col][k] = params.init_prior();
+}
 int main(int argc, char** argv ){
+
 
     VideoCapture capture = processVideo("video/umcp.mpg");
 
     keyboard = 0;
 
-    initialiseVec();
-    params.initParams(frame.size().width,frame.size().height);
+    double w = capture.get(CV_CAP_PROP_FRAME_WIDTH);
+    double h = capture.get(CV_CAP_PROP_FRAME_HEIGHT);
+    params.initParams(w,h);
+    initialiseVec();                                                            // create vectors for the gaussian params for each pixel
 
     // the main while loop inside which the video processing happens
     while( keyboard != 'q' && keyboard != 27 ){
+
         //read the current frame
         if(!capture.read(frame)) {
             cerr << "Unable to read next frame." << endl;
@@ -159,25 +199,59 @@ int main(int argc, char** argv ){
         }
 
         //PROCESS HERE
-
         //For each Pixel -- Do the EM steps
-        for (int x = 0; x < params.getCols(); ++x)
+        for (int x = 0; x < params.getCols(); x++)
         {
-            for (int y = 0; y < params.getRows(); ++y)
+            for (int y = 0; y < params.getRows(); y++)
             {
                 Vec3b intensity = frame.at<Vec3b>(y,x);                         // i.e. X(t)
 
+                if(y == 50 and x == 50){
+//                    cout<<"intensity :"<<intensity<<endl;
+                    cout<<"mean : "<<mu[y][x][0]<<"\t"<<mu[y][x][1]<<"\t"<<mu[y][x][2]<<endl;
+                    cout<<"covar :"<<covar[y][x][0]<<"\t"<<covar[y][x][1]<<"\t"<<covar[y][x][2]<<endl;
+                    cout<<"prior :"<<pr[y][x][0]<<"\t"<<pr[y][x][1]<<"\t"<<pr[y][x][2]<<endl;
+                }
                 /*  To read the color values use below code
                 uchar blue = intensity.val[0];
                 uchar green = intensity.val[1];
                 uchar red = intensity.val[2];
                 */
+            // Find the distribution that matches the current value.
+                int best_distr = -1, worst_distr = 0,maxsum = 0;
+                for(int i=0;i<params.maxModes();i++){
 
-
+                    double temp = 2.5 * sqrt(covar[y][x][i]);                // max allowed = 2.5 *sig.
+                    Vec3b vec = intensity - mu[y][x][i];
+                    bool found = true;
+                    int sum = 0;
+                    for(int j = 0;j<3;j++){                                     // deviation less than 2.5*sig for b,g,r
+                        if( fabs(vec.val[j]) > temp ){
+                            found = false;
+                        }
+                        sum += vec.val[j]*vec.val[j];
+                    }
+                    if(sum>maxsum){
+                        worst_distr = i;
+                        maxsum = sum;
+                    }
+                    if(found){
+                        best_distr = i;
+                        break;
+                    }
+                }
+            // if distribution found :
+                if(best_distr>-1)
+                    update_gaussian(intensity,y,x,best_distr);
+                else{
+                    replace_gaussian(intensity,y,x,worst_distr);
+                }
+                normalise_prior();
             //Expectation step -- maximize pr based off values of pixel
 
 
-            //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
+
+                //Maximization step -- maximize mu, pi, and covar based off the pr -- use formulas
 
 
             }
@@ -207,41 +281,5 @@ int main(int argc, char** argv ){
     //delete capture object
     capture.release();
 
-
-/*
-  Mat src;                                                                      // Each frame.
-  int framecount = 0;                                                           // For process end.
-  vector<string> frames;                                                        // name of each frame.
-  getframes("video/frames/",frames);
-  int maxG = 0;                                                                 // maxG <= K, the max number of Gaussians.
-  src = imread("video/frames/"+frames[framecount+2], CV_LOAD_IMAGE_COLOR);
-  params.initParams(src.size().width,src.size().height);
-  initialiseVec();
-
-  while(true){
-    if(framecount==10){
-      cout<<"Done."<<endl;
-      break;
-    }
-    src = imread("video/frames/"+frames[framecount+2], CV_LOAD_IMAGE_COLOR);
-
-    // //To get intensity value at a point (x,y) // row => y, col => x.
-    // // ordered BGR.
-    // Vec3b intensity;
-    // for(int y=0;y<100;y++){
-    //   for(int x = 0;x<100;x++){
-    //     intensity = src.at<Vec3b>(y,x);
-    //     float blue = intensity.val[0];
-    //     float green = intensity.val[1];
-    //     float red = intensity.val[2];
-    //     printf("blue: %f green: %f red: %f \n",blue,green,red );
-    //   }
-    // }
-    framecount++;
-  }
-  imshow("",src);
-  waitKey(0);
-
-  */
-  return 0;
+    return 0;
 }

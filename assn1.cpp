@@ -246,7 +246,7 @@ int main(int argc, char** argv ){
                 else{
                     replace_gaussian(intensity,y,x,worst_distr);
                 }
-                normalise_prior();
+//                normalise_prior();
             //Expectation step -- maximize pr based off values of pixel
 
 

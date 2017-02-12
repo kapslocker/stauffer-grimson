@@ -1,5 +1,4 @@
 #include <iostream>
-#include <dirent.h>                 // for detecting frames
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -16,24 +15,6 @@ using namespace std;
 
 const double PI = 4*atan(1);
 
-/**
-*  @params dir, frames
-*  Fill vector frames with file names of images from directory dir.
-*/
-/*
-void getframes(string dir, vector<string> &frames){
-  DIR *dp;
-  struct dirent *dirp;
-  dp = opendir(dir.c_str());
-  while( (dirp = readdir(dp)) !=NULL){
-    frames.push_back(string(dirp->d_name));
-  }
-  sort(frames.begin(),frames.end());
-  closedir(dp);
-  return;
-}
-*/
-
 /*
 * Contains parameters for the program
 */
@@ -47,14 +28,14 @@ class Params{
     int width;
     int height;
     int K;
-    float alpha, T;
+    double alpha, T;
     public:
         void initParams(int w, int h){
         width = w;
         height = h;
         K = 3;
-        alpha = 0.1f;
-        T = 0.95f;
+        alpha = 0.01;
+        T = 0.9;
     }
     int getCols(){
         return width;
@@ -65,17 +46,17 @@ class Params{
     int maxModes(){
         return K;
     }
-    float learning_rate(){
+    double learning_rate(){
         return alpha;
     }
     Vec3b init_mean(){
         return Vec3b(0,0,0);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
-        return 360.0f;
+        return 36.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
-        return 1/maxModes();
+        return 1/((double)maxModes());
     }
     float threshold(){
         return T;
@@ -130,7 +111,8 @@ VideoCapture processVideo(char* fileName){
 */
 double eval_gaussian(Vec3b X, Vec3b u, double sig_squared){
     double s = pow(norm(X - u),2);
-    return exp(-0.5 * s/sig_squared )/sqrt(pow(2*PI,3)*sig_squared);
+    double gaus = exp(-s/(2*sig_squared));
+    return gaus/sqrt(pow(2*PI,3)*sig_squared);
 }
 
 
@@ -138,30 +120,25 @@ double eval_gaussian(Vec3b X, Vec3b u, double sig_squared){
 * Updates the value of mu, sig_squared for a specific distribution
 * for the given pixel at time t
 */
-//void update_gaussian(Vec3b X, Vec3b &u, double &sig_squared){
-void update_gaussian(Vec3b X, int row, int col, int k){
+void update_gaussian(Vec3b X, int row, int col, int k, bool is_match = false){
+
     Vec3b u = mu[row][col][k];
-
     double sig_squared = covar[row][col][k];
-
-    if(sig_squared == 0){
-        sig_squared = 100;
-    }
     double p = params.learning_rate() * eval_gaussian(X, u, sig_squared);
+
     u = (1-p)*u + p*X;
-    sig_squared = (1-p)*sig_squared + pow(norm(X - u),2);
+    sig_squared = (1-p)*sig_squared + p*pow(norm(X - u),2);
 
     mu[row][col][k] = u;
     covar[row][col][k] = sig_squared;
-    pr[row][col][k] = (1-params.learning_rate())*pr[row][col][k] + params.learning_rate();
-
+    //for the best match, w = (1-alpha)*w + alpha
+    pr[row][col][k] = (1-params.learning_rate())*pr[row][col][k] + is_match*params.learning_rate();
 }
 
 void replace_gaussian(Vec3b X, int row, int col, int k){
     mu[row][col][k] = X;
-    covar[row][col][k] = params.init_covar();
-    pr[row][col][k] = params.init_prior();
-
+    covar[row][col][k] = params.init_covar()*100;
+    pr[row][col][k] = params.init_prior()/10;
 }
 
 /*
@@ -177,24 +154,90 @@ void normalise_prior(int row, int col){
             pr[row][col][i] /= s;
 }
 
+// Global variables
+Mat frame; //current frame
+Mat bg_frame;
+Mat fg_frame;
+
+
+/*
+* Perform the following at each pixel (y,x) y-> row, x -> col
+*/
+void perform_pixel(int y, int x){
+    Vec3b intensity = frame.at<Vec3b>(y,x);                         // i.e. X(t)
+    // Find the distribution that matches the current value.
+    int best_distr = -1, worst_distr = 0,worst_dist_sq = 0;
+    double min_dist_square = 1000000;
+    for(int i=0;i<params.maxModes();i++){                           // Checking against each Gaussian
+        Vec3b vec = intensity - mu[y][x][i];
+        double dist_sq = pow(norm(vec),2);
+        double thres_sq = 6.25 * covar[y][x][i];                // max allowed = 2.5 *sig.
+        if( dist_sq < thres_sq ){
+            if(dist_sq < min_dist_square){
+                min_dist_square = dist_sq;
+                best_distr = i;
+            }
+        }
+        if(dist_sq > worst_dist_sq){
+            worst_distr = i;
+            worst_dist_sq = dist_sq;
+        }
+    }
+    // if distribution found :
+    if(best_distr>-1){
+        for(int i=0;i<params.maxModes();i++){
+            if(i == best_distr){
+                update_gaussian(intensity,y,x,i,true);
+            }
+            else{
+                update_gaussian(intensity,y,x,i);
+            }
+        }
+    }
+    else{
+        replace_gaussian(intensity,y,x,worst_distr);
+        for(int i=0;i<params.maxModes();i++){
+            update_gaussian(intensity,y,x,i);
+        }
+        //  Normalise only if a Gaussian is replaced!
+        normalise_prior(y,x);
+    }
+    vector<pair<double,double> > gaus(params.maxModes());
+    for(int i=0;i<params.maxModes();i++){
+        gaus[i] = make_pair( pr[y][x][i]/sqrt(covar[y][x][i]) , i);  // sort Gaussians wrt w/sigma, identifier used
+                                                                    // is the index of that Gaussian
+    }
+    sort(gaus.begin(), gaus.end(), Compare);
+
+    float sum = 0;
+    int B;
+    for(B=0;B<params.maxModes();B++){
+        sum += gaus[B].first;
+        if(sum > params.threshold())    break;
+    }
+    // modeling with the top match.
+    bool f = false;
+    for(int j=0;j<B;j++){
+        if( norm( intensity - mu[y][x][gaus[j].second]) < 2.5*sqrt(covar[y][x][gaus[j].second]) ){
+            bg_frame.at<Vec3b>(y,x) = mu[y][x][gaus[j].second];
+            f = true;
+            break;
+        }
+    }
+    fg_frame.at<Vec3b>(y,x) = intensity - bg_frame.at<Vec3b>(y,x);
+}
+
 int main(int argc, char** argv ){
-
-    // Global variables
-    Mat frame; //current frame
-    Mat bg_frame;
-    Mat fg_frame;
-
     char keyboard; //input from keyboard
 
     VideoCapture capture = processVideo("video/umcp.mpg");
 
     keyboard = 0;
-
     double w = capture.get(CV_CAP_PROP_FRAME_WIDTH);
     double h = capture.get(CV_CAP_PROP_FRAME_HEIGHT);
     params.initParams(w,h);
-    initialiseVec();                                                            // create vectors for the gaussian params for each pixel
-
+    // create vectors for the gaussian params for each pixel
+    initialiseVec();
     bg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
     fg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
     // the main while loop inside which the video processing happens
@@ -208,70 +251,12 @@ int main(int argc, char** argv ){
         }
 
         //PROCESS HERE
-        //For each Pixel -- Do the EM steps
+        //For each Pixel -- Perform update steps
         for (int x = 0; x < params.getCols(); x++ )
         {
             for (int y = 0; y < params.getRows(); y++ )
             {
-                Vec3b intensity = frame.at<Vec3b>(y,x);                         // i.e. X(t)
-/*
-                if(y == 100 and x == 100){
-                    cout<<"intensity :"<<intensity<<endl;
-                    cout<<"mean : "<<mu[y][x][0]<<"\t"<<mu[y][x][1]<<"\t"<<mu[y][x][2]<<endl;
-                    cout<<"covar :"<<covar[y][x][0]<<"\t"<<covar[y][x][1]<<"\t"<<covar[y][x][2]<<endl;
-                    cout<<"prior :"<<pr[y][x][0]<<"\t"<<pr[y][x][1]<<"\t"<<pr[y][x][2]<<endl;
-                }
-*/            // Find the distribution that matches the current value.
-                int best_distr = -1, worst_distr = 0,worst_dist_sq = 0;
-
-                for(int i=0;i<params.maxModes();i++){
-                    Vec3b vec = intensity - mu[y][x][i];
-                    double dist_sq = pow(norm(vec),2);
-                    double thres_sq = 6.25 * covar[y][x][i];                // max allowed = 2.5 *sig.
-                    if( dist_sq < thres_sq ){
-                        update_gaussian(intensity,y,x,i);
-                        break;
-//                        best_distr = i;
-                    }
-                    if(dist_sq > worst_dist_sq){
-                        worst_distr = i;
-                        worst_dist_sq = dist_sq;
-                    }
-                }
-            // if distribution found :
-                if(best_distr>-1){
-//                    update_gaussian(intensity,y,x,best_distr);
-                }
-                else{
-                    replace_gaussian(intensity,y,x,worst_distr);
-                //  Normalise only if a Gaussian is replaced!
-                    normalise_prior(y,x);
-                }
-//                if(y == 100 and x == 100)
-//                    circle( frame,Point(50,50),10.0,Scalar( 0, 0, 255 ));
-
-                vector<pair<double,double> > gaus(params.maxModes());
-                for(int i=0;i<params.maxModes();i++){
-                    gaus[i] = make_pair( pr[y][x][i]/sqrt(covar[y][x][i]) , i);  // sort Gaussians wrt w/sigma, identifier used
-                                                                                // is the index of that Gaussian
-                }
-                sort(gaus.begin(), gaus.end(), Compare);
-
-                float sum = 0;
-                int B;
-                for(B=0;B<params.maxModes();B++){
-                    sum += gaus[B].first;
-                    if(sum > params.threshold())    break;
-                }
-                bool f = false;
-                for(int j=0;j<B;j++){
-                    if( norm( intensity - mu[y][x][gaus[j].second]) < 2.5*sqrt(covar[y][x][gaus[j].second]) ){
-                        bg_frame.at<Vec3b>(y,x) = mu[y][x][gaus[j].second];
-                        f = true;
-                        break;
-                    }
-                }
-                fg_frame.at<Vec3b>(y,x) = intensity - bg_frame.at<Vec3b>(y,x);
+                perform_pixel(y,x);
             }
         }
 
@@ -284,9 +269,8 @@ int main(int argc, char** argv ){
         string frameNumberString = ss.str();
         putText(frame, frameNumberString.c_str(), cv::Point(15, 15),
                 FONT_HERSHEY_SIMPLEX, 0.5 , cv::Scalar(0,0,0));
-        //show the current frame and the fg masks
-        imshow("Frame", frame);
 
+        imshow("Original", frame);
         imshow("Foreground", fg_frame);
         imshow("Background", bg_frame);
 

@@ -24,6 +24,13 @@ bool Compare(const pair<double, double>&i, const pair<double,double>&j)
     return i.first > j.first;
 }
 
+Vec3b convert_3d_to_3b(Vec3d vec3d){
+    Vec3b vec3b = Vec3b((uchar)vec3d.val[0],(uchar)vec3d.val[1],(uchar)vec3d.val[2]);
+    return vec3b;
+}
+Vec3d convert_3b_to_3d(Vec3b vec3b){
+    return Vec3d((double)vec3b.val[0],(double)vec3b.val[1],(double)vec3b.val[2]);
+}
 class Params{
     int width;
     int height;
@@ -34,8 +41,8 @@ class Params{
         width = w;
         height = h;
         K = 3;
-        alpha = 0.01;
-        T = 0.9;
+        alpha = 0.1;
+        T = 0.85;
     }
     int getCols(){
         return width;
@@ -49,35 +56,42 @@ class Params{
     double learning_rate(){
         return alpha;
     }
-    Vec3b init_mean(){
-        return Vec3b(0,0,0);
+    Vec3d init_mean(){
+        return Vec3d(0,0,0);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
         return 36.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
-        return 1/((double)maxModes());
+        return 1.0/((double)maxModes());
     }
     float threshold(){
         return T;
     }
 }params;
 
+double norm_sq(Vec3d X){
+    double s = 0;
+    for(int i=0;i<3;i++){
+        s += X.val[i]*X.val[i];
+    }
+    return s;
+}
 
 //parameters of the gaussians, 3 for each pixel
-vector<vector<vector<Vec3b> > > mu;
+vector<vector<vector<Vec3d> > > mu;
 vector<vector<vector<double> > >covar;                                          // Mean and Covariance for each Gaussian at pixel (x,y).
 vector<vector<vector<double> > > pr;                                       // Each Gaussian's contribution to the mixture at pixel (x,y)
 
 
 void initialiseVec(){
      for(int i=0;i<params.getRows();i++){
-        mu.push_back(vector<vector<Vec3b> >());
+        mu.push_back(vector<vector<Vec3d> >());
         covar.push_back(vector<vector<double> >());
         pr.push_back(vector<vector<double> >());
 
         for(int j=0;j<params.getCols();j++){
-            mu[i].push_back(vector<Vec3b>());
+            mu[i].push_back(vector<Vec3d>());
             covar[i].push_back(vector<double>());
             pr[i].push_back(vector<double>());
 
@@ -109,10 +123,11 @@ VideoCapture processVideo(char* fileName){
 /*
 * Evaluates the Gaussian, with covariance matrix as simply sig_squared * I .
 */
-double eval_gaussian(Vec3b X, Vec3b u, double sig_squared){
-    double s = pow(norm(X - u),2);
-    double gaus = exp(-s/(2*sig_squared));
-    return gaus/sqrt(pow(2*PI,3)*sig_squared);
+double eval_gaussian(Vec3d X, Vec3d u, double sig_squared){
+    double s = norm_sq(X-u);
+    double gaus = exp(s/(-2.0*sig_squared));
+    gaus = gaus/sqrt(pow(2.0*PI,3.0)*sig_squared);
+    return gaus;
 }
 
 
@@ -120,25 +135,25 @@ double eval_gaussian(Vec3b X, Vec3b u, double sig_squared){
 * Updates the value of mu, sig_squared for a specific distribution
 * for the given pixel at time t
 */
-void update_gaussian(Vec3b X, int row, int col, int k, bool is_match = false){
+void update_gaussian(Vec3d X, int row, int col, int k, bool is_match = false){
 
-    Vec3b u = mu[row][col][k];
+    Vec3d u = mu[row][col][k];
     double sig_squared = covar[row][col][k];
     double p = params.learning_rate() * eval_gaussian(X, u, sig_squared);
 
-    u = (1-p)*u + p*X;
-    sig_squared = (1-p)*sig_squared + p*pow(norm(X - u),2);
-
+    u = (1.0-p)*u + p*X;
+    sig_squared = (1.0-p)*sig_squared + p*norm_sq(X - u);
+//    cout<<p*norm_sq(X-u)<<endl;
     mu[row][col][k] = u;
     covar[row][col][k] = sig_squared;
     //for the best match, w = (1-alpha)*w + alpha
-    pr[row][col][k] = (1-params.learning_rate())*pr[row][col][k] + is_match*params.learning_rate();
+    pr[row][col][k] = (1.0 -params.learning_rate())*pr[row][col][k] + ((double)is_match)*params.learning_rate();
 }
 
-void replace_gaussian(Vec3b X, int row, int col, int k){
+void replace_gaussian(Vec3d X, int row, int col, int k){
     mu[row][col][k] = X;
-    covar[row][col][k] = params.init_covar()*100;
-    pr[row][col][k] = params.init_prior()/10;
+    covar[row][col][k] = params.init_covar();
+    pr[row][col][k] = params.init_prior();
 }
 
 /*
@@ -164,42 +179,37 @@ Mat fg_frame;
 * Perform the following at each pixel (y,x) y-> row, x -> col
 */
 void perform_pixel(int y, int x){
-    Vec3b intensity = frame.at<Vec3b>(y,x);                         // i.e. X(t)
+    Vec3b value = frame.at<Vec3b>(y,x);                         // i.e. X(t)
     // Find the distribution that matches the current value.
-    int best_distr = -1, worst_distr = 0,worst_dist_sq = 0;
+    Vec3d intensity = convert_3b_to_3d(value);
+    int worst_distr = 0,worst = 0;
+    bool found = false;
     double min_dist_square = 1000000;
     for(int i=0;i<params.maxModes();i++){                           // Checking against each Gaussian
-        Vec3b vec = intensity - mu[y][x][i];
-        double dist_sq = pow(norm(vec),2);
-        double thres_sq = 6.25 * covar[y][x][i];                // max allowed = 2.5 *sig.
-        if( dist_sq < thres_sq ){
-            if(dist_sq < min_dist_square){
-                min_dist_square = dist_sq;
-                best_distr = i;
-            }
+        Vec3d vec = intensity - mu[y][x][i];
+        double dist = norm(vec,NORM_INF);
+        double thres = 2.5 * covar[y][x][i];                // max allowed = 2.5 *sig.
+        if( dist < thres ){
+            found = true;
+            update_gaussian(intensity,y,x,i,true);
         }
-        if(dist_sq > worst_dist_sq){
-            worst_distr = i;
-            worst_dist_sq = dist_sq;
+        else{
+            update_gaussian(intensity,y,x,i);                               // do not add alpha to the other gaussians
         }
     }
-    // if distribution found :
-    if(best_distr>-1){
+    if(!found){
+        // We need to replace a Gaussian now.
+        Vec3d vec;
+        double dist;
         for(int i=0;i<params.maxModes();i++){
-            if(i == best_distr){
-                update_gaussian(intensity,y,x,i,true);
-            }
-            else{
-                update_gaussian(intensity,y,x,i);
+            vec = intensity - mu[y][x][i];
+            dist = norm(vec,NORM_INF);
+            if(dist > worst){
+                worst = dist;
+                worst_distr = i;
             }
         }
-    }
-    else{
         replace_gaussian(intensity,y,x,worst_distr);
-        for(int i=0;i<params.maxModes();i++){
-            update_gaussian(intensity,y,x,i);
-        }
-        //  Normalise only if a Gaussian is replaced!
         normalise_prior(y,x);
     }
     vector<pair<double,double> > gaus(params.maxModes());
@@ -217,14 +227,21 @@ void perform_pixel(int y, int x){
     }
     // modeling with the top match.
     bool f = false;
+    double prior_sum = 0;
+
+    Vec3d temp_3d = Vec3d(0,0,0);
     for(int j=0;j<B;j++){
-        if( norm( intensity - mu[y][x][gaus[j].second]) < 2.5*sqrt(covar[y][x][gaus[j].second]) ){
-            bg_frame.at<Vec3b>(y,x) = mu[y][x][gaus[j].second];
-            f = true;
-            break;
-        }
+//        if( norm( intensity - mu[y][x][gaus[j].second]) < 2.5*sqrt(covar[y][x][gaus[j].second]) ){
+            temp_3d += pr[y][x][gaus[j].second]*mu[y][x][gaus[j].second];
+            prior_sum += pr[y][x][gaus[j].second];
+//            break;
+//        }
     }
-    fg_frame.at<Vec3b>(y,x) = intensity - bg_frame.at<Vec3b>(y,x);
+    temp_3d /= prior_sum;
+    bg_frame.at<Vec3b>(y,x) = convert_3d_to_3b(temp_3d);
+    fg_frame.at<Vec3b>(y,x) = value - bg_frame.at<Vec3b>(y,x);
+    if(y == 200 and x == 200)
+    cout<<B<<"\t"<<mu[y][x][0]<<"\t"<<mu[y][x][1]<<"\t"<<mu[y][x][2]<<"\t"<<pr[y][x][0]<<"\t"<<pr[y][x][1]<<"\t"<<pr[y][x][2]<<bg_frame.at<Vec3b>(y,x)<<endl;
 }
 
 int main(int argc, char** argv ){
@@ -249,7 +266,6 @@ int main(int argc, char** argv ){
             cerr << "Exiting..." << endl;
             exit(EXIT_FAILURE);
         }
-
         //PROCESS HERE
         //For each Pixel -- Perform update steps
         for (int x = 0; x < params.getCols(); x++ )

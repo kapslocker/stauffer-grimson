@@ -42,7 +42,7 @@ class Params{
         height = h;
         K = 3;
         alpha = 0.1;
-        T = 0.85;
+        T = 0.7;
     }
     int getCols(){
         return width;
@@ -60,7 +60,7 @@ class Params{
         return Vec3d(0,0,0);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
-        return 36.0;
+        return 10.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
         return 1.0/((double)maxModes());
@@ -78,6 +78,15 @@ double norm_sq(Vec3d X){
     return s;
 }
 
+double min_val(Vec3d X){
+    double m = X.val[0];
+    for(int i = 0;i<3;i++){
+        if(X.val[i]<m){
+            m = X.val[i];
+        }
+    }
+    return m;
+}
 //parameters of the gaussians, 3 for each pixel
 vector<vector<vector<Vec3d> > > mu;
 vector<vector<vector<double> > >covar;                                          // Mean and Covariance for each Gaussian at pixel (x,y).
@@ -107,7 +116,7 @@ void initialiseVec(){
     }
 }
 
-VideoCapture processVideo(char* fileName){
+VideoCapture processVideo(string fileName){
     VideoCapture capture(fileName);
         if(!capture.isOpened()){
             //error in opening the video input
@@ -143,7 +152,6 @@ void update_gaussian(Vec3d X, int row, int col, int k, bool is_match = false){
 
     u = (1.0-p)*u + p*X;
     sig_squared = (1.0-p)*sig_squared + p*norm_sq(X - u);
-//    cout<<p*norm_sq(X-u)<<endl;
     mu[row][col][k] = u;
     covar[row][col][k] = sig_squared;
     //for the best match, w = (1-alpha)*w + alpha
@@ -152,8 +160,8 @@ void update_gaussian(Vec3d X, int row, int col, int k, bool is_match = false){
 
 void replace_gaussian(Vec3d X, int row, int col, int k){
     mu[row][col][k] = X;
-    covar[row][col][k] = params.init_covar();
-    pr[row][col][k] = params.init_prior();
+    covar[row][col][k] = params.init_covar()*10;
+    pr[row][col][k] = params.init_prior()/10;
 }
 
 /*
@@ -185,16 +193,16 @@ void perform_pixel(int y, int x){
     int worst_distr = 0,worst = 0;
     bool found = false;
     double min_dist_square = 1000000;
-    for(int i=0;i<params.maxModes();i++){                           // Checking against each Gaussian
+    for(int i=0;i<params.maxModes();i++){                                       // Checking against each Gaussian
         Vec3d vec = intensity - mu[y][x][i];
-        double dist = norm(vec,NORM_INF);
-        double thres = 2.5 * covar[y][x][i];                // max allowed = 2.5 *sig.
+        double dist = min_val(vec);
+        double thres = 2.5 * sqrt(covar[y][x][i]);                              // max allowed = 2.5 *sig.
         if( dist < thres ){
             found = true;
             update_gaussian(intensity,y,x,i,true);
         }
         else{
-            update_gaussian(intensity,y,x,i);                               // do not add alpha to the other gaussians
+            update_gaussian(intensity,y,x,i);                                   // do not add alpha to the other gaussians
         }
     }
     if(!found){
@@ -214,8 +222,8 @@ void perform_pixel(int y, int x){
     }
     vector<pair<double,double> > gaus(params.maxModes());
     for(int i=0;i<params.maxModes();i++){
-        gaus[i] = make_pair( pr[y][x][i]/sqrt(covar[y][x][i]) , i);  // sort Gaussians wrt w/sigma, identifier used
-                                                                    // is the index of that Gaussian
+        gaus[i] = make_pair( pr[y][x][i]/sqrt(covar[y][x][i]) , i);             // sort Gaussians wrt w/sigma, identifier used
+                                                                                // is the index of that Gaussian
     }
     sort(gaus.begin(), gaus.end(), Compare);
 
@@ -240,14 +248,14 @@ void perform_pixel(int y, int x){
     temp_3d /= prior_sum;
     bg_frame.at<Vec3b>(y,x) = convert_3d_to_3b(temp_3d);
     fg_frame.at<Vec3b>(y,x) = value - bg_frame.at<Vec3b>(y,x);
-    if(y == 200 and x == 200)
-    cout<<B<<"\t"<<mu[y][x][0]<<"\t"<<mu[y][x][1]<<"\t"<<mu[y][x][2]<<"\t"<<pr[y][x][0]<<"\t"<<pr[y][x][1]<<"\t"<<pr[y][x][2]<<bg_frame.at<Vec3b>(y,x)<<endl;
+//    if(y == 200 and x == 200)
+//    cout<<B<<"\t"<<mu[y][x][0]<<"\t"<<bg_frame.at<Vec3b>(y,x)<<"\t"<<covar[y][x][0]<<endl;
 }
 
 int main(int argc, char** argv ){
     char keyboard; //input from keyboard
-
-    VideoCapture capture = processVideo("video/umcp.mpg");
+    string vid_loc = "video/umcp.mpg";
+    VideoCapture capture = processVideo(vid_loc);
 
     keyboard = 0;
     double w = capture.get(CV_CAP_PROP_FRAME_WIDTH);
@@ -278,6 +286,7 @@ int main(int argc, char** argv ){
 
         //The output area -- output video and whatever else we want
         //get the frame number and write it on the current frame
+        circle(frame, Point(300,180),10,Scalar(0,0,0));
         stringstream ss;
         rectangle(frame, cv::Point(10, 2), cv::Point(100,20),
                   cv::Scalar(255,255,255), -1);

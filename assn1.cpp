@@ -44,8 +44,8 @@ class Params{
         width = w;
         height = h;
         K = 4;
-        alpha = 0.15;
-        T = 0.56;
+        alpha = 0.015;
+        T = 0.75;
     }
     int getCols(){
         return width;
@@ -63,7 +63,7 @@ class Params{
         return Vec3d(255,255,255);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
-        return 6.0;
+        return 36.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
         return 1.0/((double)maxModes());
@@ -166,8 +166,8 @@ void update_gaussian(Vec3d &X, int &row, int &col, int &k, bool is_match = false
 
 void replace_gaussian(Vec3d X, int row, int col, int k){
     mu[row][col][k] = X;
-    covar[row][col][k] = params.init_covar()*10;
-    pr[row][col][k] = params.init_prior()/10;
+    covar[row][col][k] = params.init_covar();
+    pr[row][col][k] = params.init_prior();
 }
 
 /*
@@ -240,14 +240,14 @@ void perform_pixel(int y, int x){
     float sum = 0;
     int B;
     for(B=0;B<params.maxModes();B++){
-        sum += gaus[B].first;
+        sum += gaus[B].first * sqrt(covar[y][x][(int)gaus[B].second]);
         if(sum > params.threshold())    break;
     }
 
     double prior_sum = 0.0;
 
     Vec3d temp_3d = Vec3d(0,0,0);int pos;
-    for(int j=0;j<B;j++){
+    for(int j=0;j<=B;j++){
         pos = gaus[j].second;
         temp_3d += pr[y][x][pos]*mu[y][x][pos];
         prior_sum += pr[y][x][pos];
@@ -259,12 +259,12 @@ void perform_pixel(int y, int x){
     }else{
         fg_frame.at<Vec3b>(y,x) = Vec3b(0,0,0);
     }
-    //fg_frame.at<Vec3b>(y,x) = value - bg_frame.at<Vec3b>(y,x);
     if(B<4){
 //        cout<<y<<" "<<x<<endl;
     }
     if(x == 100 and y == 100){
-        cout<<value<<" "<<found<<": "<<match<<" "<<mu[y][x][3]<<"\t"<<B<<endl;
+//        cout<<B<<"\t"<<prior_sum<<endl;
+//        cout<<value<<" "<<found<<": "<<match<<" "<<mu[y][x][3]<<"\t"<<B<<endl;
     }
 }
 

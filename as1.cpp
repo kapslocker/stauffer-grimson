@@ -63,7 +63,7 @@ class Params{
         height = h;
         K = 3;
         alpha = 0.05;
-        T = 0.5;
+        T = 0.3;
     }
     int getCols(){
         return width;
@@ -81,7 +81,7 @@ class Params{
         return Vec3b(0,0,0);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
-        return 5.0;
+        return 400.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
         return 1.0/((double)maxModes());
@@ -126,32 +126,35 @@ void initialiseVec(){
     }
 }
 
-//update all gaussians
-void update_gaussians(Vec3b intensity, int y, int x, int k){
-
-	for(int i =0; i< params.maxModes() ; i++){
-		bool match = i==k?true:false;
-		//update responsibility
-		pr[y][x][k] = (1 - params.learning_rate())*pr[y][x][k] + params.learning_rate()*match;
+void update_gaussian(Vec3b intensity, int y, int x, int k, bool match){
+	//update responsibility
+	pr[y][x][k] = (1 - params.learning_rate())*pr[y][x][k] + params.learning_rate()*match;
 
 
-		if(match){
-			//update mean and sigma
-			//parameter p
-			double p = params.learning_rate() * eval_gaussian(intensity, mu[y][x][k], covar[y][x][k]);
+	if(match){
+		//update mean and sigma
+		//parameter p
+		double p = params.learning_rate() * eval_gaussian(intensity, mu[y][x][k], covar[y][x][k]);
 
-			mu[y][x][k]	= (1.0 - p) * mu[y][x][k] + p*intensity;
+		mu[y][x][k]	=(1.0 - p)* (Vec3d) mu[y][x][k] + p* (Vec3d) intensity;
 
-			covar[y][x][k] = (1.0 - p)*covar[y][x][k] + p*norm_sq(intensity - mu[y][x][k]);
+		covar[y][x][k] = (1.0 - p)*covar[y][x][k] + p*norm_sq(intensity - mu[y][x][k]);
+	}
+	else{
+		for(int i =0; i< params.maxModes() ; i++){
+			if(i!=k){
+				pr[y][x][k] = (1 - params.learning_rate())*pr[y][x][k];
+			}
 		}
 	}
 }
 
 
+
 void replace_gaussian(Vec3b X, int row, int col, int k){
     mu[row][col][k] = X;
     covar[row][col][k] = params.init_covar();
-    pr[row][col][k] = params.init_prior();
+    pr[row][col][k] = params.init_prior()/10;
 }
 
 void normalize_weights(int row, int col){
@@ -182,7 +185,7 @@ void perform_pixel(int y, int x){
 		if(dist < thresh){
 			match = true;
 
-			update_gaussians(intensity, y,x,i);
+			update_gaussian(intensity, y,x,i,match);
 			normalize_weights(y,x);
 
 			break;
@@ -205,6 +208,7 @@ void perform_pixel(int y, int x){
         replace_gaussian(intensity,y,x,worst_distr);
         normalize_weights(y,x);
 	}
+
 
 
 	// to get the B best gaussians based on threshold
@@ -237,11 +241,11 @@ void perform_pixel(int y, int x){
     
 
     bg_frame.at<Vec3b>(y,x) = (temp_3d);
-    if(!match){
-        fg_frame.at<Vec3b>(y,x) = Vec3b(255,255,255);
-    }else{
-        fg_frame.at<Vec3b>(y,x) = Vec3b(0,0,0);
-    }
+    // if(!match){
+    //     fg_frame.at<Vec3b>(y,x) = Vec3b(255,255,255);
+    // }else{
+    //     fg_frame.at<Vec3b>(y,x) = Vec3b(0,0,0);
+    // }
 
 }
 
@@ -258,9 +262,13 @@ VideoCapture processVideo(string fileName){
     return capture;
 }
 
+Ptr<BackgroundSubtractor> pMOG2; //MOG2 Background subtractor
+
 int main(int argc, char** argv ){
     char keyboard; //input from keyboard
-    string vid_loc = "video/umcp.mpg";
+ //   string vid_loc = "video/umcp.mpg";
+    string vid_loc = "video/pets01.wmv";
+
     VideoCapture capture = processVideo(vid_loc);
     keyboard = 0;
     double w = capture.get(CV_CAP_PROP_FRAME_WIDTH);
@@ -269,7 +277,9 @@ int main(int argc, char** argv ){
     // create vectors for the gaussian params for each pixel
     initialiseVec();
     bg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
-    fg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
+//    fg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
+
+	pMOG2 = createBackgroundSubtractorMOG2(); //MOG2 approach
     // the main while loop inside which the video processing happens
     while( keyboard != 'q' && keyboard != 27 ){
 
@@ -288,7 +298,7 @@ int main(int argc, char** argv ){
                 perform_pixel(y,x);
             }
         }
-
+        pMOG2->apply(frame, fg_frame);
         //The output area -- output video and whatever else we want
         //get the frame number and write it on the current frame
         imshow("Original", frame);

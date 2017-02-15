@@ -299,8 +299,15 @@ int main(int argc, char** argv ){
                 perform_pixel(y,x);
             }
         }
+
+        fg_frame = bg_frame - frame;
+        threshold(fg_frame, fg_frame, 20, 255, THRESH_BINARY ); 
+        Mat grayfg = Mat(params.getRows(), params.getCols(), CV_8U);
+        cvtColor( fg_frame, grayfg, CV_BGR2GRAY );
+        threshold(grayfg, grayfg, 250, 255, THRESH_BINARY ); 
+
         imshow("Original", frame);
-        imshow("Foreground", fg_frame);
+        imshow("Foreground", grayfg);
         imshow("Background", bg_frame);
 
         //get the input from the keyboard

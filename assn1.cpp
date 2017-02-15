@@ -264,7 +264,10 @@ void perform_pixel(int y,int x){
 }
 
 int main(int argc, char** argv ){
-    char keyboard; //input from keyboard
+
+	int numthreads = omp_get_max_threads();
+
+    char keyboard; //input from keyboard	
     string vid_loc = "video/umcp.mpg";
     VideoCapture capture;
     capture.release();
@@ -287,10 +290,10 @@ int main(int argc, char** argv ){
         }
         //PROCESS HERE
         //For each Pixel -- Perform update steps
-        #pragma omp parallel for num_threads(4)
+        #pragma omp parallel for num_threads(numthreads/2)
         for (int x = 0; x < params.getCols(); x++ )
         {
-        	#pragma omp parallel for num_threads(4)
+        	#pragma omp parallel for num_threads(numthreads/2)
             for (int y = 0; y < params.getRows(); y++ )
             {            	
                 perform_pixel(y,x);

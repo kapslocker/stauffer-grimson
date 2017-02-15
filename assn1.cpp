@@ -267,8 +267,8 @@ int main(int argc, char** argv ){
 
 	int numthreads = omp_get_max_threads();
 
-    char keyboard; //input from keyboard	
-    string vid_loc = "video/umcp.mpg";
+    char keyboard; //input from keyboard
+    string vid_loc = "video/test4.avi";
     VideoCapture capture;
     capture.release();
     capture = processVideo(vid_loc);
@@ -290,28 +290,28 @@ int main(int argc, char** argv ){
         }
         //PROCESS HERE
         //For each Pixel -- Perform update steps
-        #pragma omp parallel for num_threads(numthreads/2)
+        #pragma omp parallel for num_threads(numthreads)
         for (int x = 0; x < params.getCols(); x++ )
         {
-        	#pragma omp parallel for num_threads(numthreads/2)
+        	#pragma omp parallel for num_threads(numthreads)
             for (int y = 0; y < params.getRows(); y++ )
-            {            	
+            {
                 perform_pixel(y,x);
             }
         }
-
         fg_frame = bg_frame - frame;
-        threshold(fg_frame, fg_frame, 20, 255, THRESH_BINARY ); 
+        threshold(fg_frame, fg_frame, 20, 255, THRESH_BINARY );
         Mat grayfg = Mat(params.getRows(), params.getCols(), CV_8U);
         cvtColor( fg_frame, grayfg, CV_BGR2GRAY );
-        threshold(grayfg, grayfg, 250, 255, THRESH_BINARY ); 
+        threshold(grayfg, grayfg, 250, 255, THRESH_BINARY );
 
+        medianBlur(grayfg,grayfg,5);
         imshow("Original", frame);
         imshow("Foreground", grayfg);
         imshow("Background", bg_frame);
 
         //get the input from the keyboard
-        keyboard = (char)waitKey( 1 );
+        keyboard = (char)waitKey(1);
     }
 
 

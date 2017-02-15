@@ -9,6 +9,7 @@
 #include "opencv2/videoio.hpp"
 #include <opencv2/highgui.hpp>
 #include <opencv2/video.hpp>
+#include <omp.h>
 
 using namespace cv;
 using namespace std;
@@ -33,7 +34,7 @@ class Params{
         void initParams(int w, int h){
         width = w;
         height = h;
-        K = 4;
+        K = 5;
         alpha = 0.01;
         T = 0.5;
     }
@@ -264,7 +265,7 @@ void perform_pixel(int y,int x){
 
 int main(int argc, char** argv ){
     char keyboard; //input from keyboard
-    string vid_loc = "video/test.mp4";
+    string vid_loc = "video/umcp.mpg";
     VideoCapture capture;
     capture.release();
     capture = processVideo(vid_loc);
@@ -286,10 +287,12 @@ int main(int argc, char** argv ){
         }
         //PROCESS HERE
         //For each Pixel -- Perform update steps
+        #pragma omp parallel for num_threads(4)
         for (int x = 0; x < params.getCols(); x++ )
         {
+        	#pragma omp parallel for num_threads(4)
             for (int y = 0; y < params.getRows(); y++ )
-            {
+            {            	
                 perform_pixel(y,x);
             }
         }

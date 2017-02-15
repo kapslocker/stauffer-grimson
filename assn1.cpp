@@ -19,21 +19,11 @@ const double PI = 4*atan(1);
 * Contains parameters for the program
 */
 
-bool Compare(const pair<double, double>&i, const pair<double,double>&j)
+bool Compare(const pair<Vec3f, double>&i, const pair<Vec3f,double>&j)
 {
-    return i.first > j.first;
+    return i.second > j.second;
 }
 
-Vec3d dabs(Vec3d X){
-    return Vec3d(fabs(X.val[0]),fabs(X.val[1]),fabs(X.val[2]));
-}
-Vec3b convert_3d_to_3b(Vec3d vec3d){
-    Vec3b vec3b = Vec3b((uchar)vec3d.val[0],(uchar)vec3d.val[1],(uchar)vec3d.val[2]);
-    return vec3b;
-}
-Vec3d convert_3b_to_3d(Vec3b vec3b){
-    return Vec3d((double)vec3b.val[0],(double)vec3b.val[1],(double)vec3b.val[2]);
-}
 class Params{
     int width;
     int height;
@@ -44,8 +34,8 @@ class Params{
         width = w;
         height = h;
         K = 4;
-        alpha = 0.015;
-        T = 0.75;
+        alpha = 0.01;
+        T = 0.5;
     }
     int getCols(){
         return width;
@@ -60,10 +50,10 @@ class Params{
         return alpha;
     }
     Vec3d init_mean(){
-        return Vec3d(255,255,255);
+        return Vec3d(0.0,0.0,0.0);
     }
     double init_covar(){                                                        // high initial covariance for a new distribution
-        return 36.0;
+        return 10.0;
     }
     double init_prior(){                                                        // low initial prior weight for a new distribution
         return 1.0/((double)maxModes());
@@ -73,23 +63,7 @@ class Params{
     }
 }params;
 
-double norm_sq(Vec3d X){
-    double s = 0;
-    for(int i=0;i<3;i++){
-        s += X.val[i]*X.val[i];
-    }
-    return s;
-}
 
-double min_val(Vec3d X){
-    double m = X.val[0];
-    for(int i = 0;i<3;i++){
-        if(X.val[i]<m){
-            m = X.val[i];
-        }
-    }
-    return m;
-}
 //parameters of the gaussians, 3 for each pixel
 Vec3d ***mu;                                                                 // height * width * modes * 3
 double ***covar;                                                                // Mean and Covariance for each Gaussian at pixel (x,y).
@@ -108,12 +82,11 @@ void initialiseVec(){
 
         for(int j=0;j<params.getCols();j++){
 
-            mu[i][j] = new Vec3d [params.maxModes()];
-            covar[i][j] = new double [params.maxModes()];
-            pr[i][j] = new double [params.maxModes()];
+            mu[i][j] = new Vec3d[params.maxModes()];
+            covar[i][j] = new double[params.maxModes()];
+            pr[i][j] = new double[params.maxModes()];
 
             for(int k = 0;k<params.maxModes();k++){
-
                 mu[i][j][k] = params.init_mean();
                 covar[i][j][k] = params.init_covar();
                 pr[i][j][k] = params.init_prior();
@@ -133,15 +106,13 @@ VideoCapture processVideo(string fileName){
     return capture;
 }
 
-
-
 /*
 * Evaluates the Gaussian, with covariance matrix as simply sig_squared * I .
 */
-double eval_gaussian(Vec3d &X, Vec3d &u, double sig_squared){
-    double s = norm_sq(X-u);
-    double gaus = exp(-0.5*s/sig_squared);
-    gaus = gaus/pow(2.0*PI*sig_squared,1.5);
+double eval_gaussian(Vec3d X,int row,int col, int k){
+    double sig_square = covar[row][col][k];
+    double gaus  = exp(-0.5 * norm(X - mu[row][col][k] , NORM_L2SQR) / sig_square );
+    gaus /= pow(2*PI*sig_square,1.5);
     return gaus;
 }
 
@@ -150,24 +121,19 @@ double eval_gaussian(Vec3d &X, Vec3d &u, double sig_squared){
 * Updates the value of mu, sig_squared for a specific distribution
 * for the given pixel at time t
 */
-void update_gaussian(Vec3d &X, int &row, int &col, int &k, bool is_match = false){
+void update_gaussian(Vec3d X, int row, int col, int k){
 
-    Vec3d u = mu[row][col][k];
-    double sig_squared = covar[row][col][k];
-    double p = params.learning_rate() * eval_gaussian(X, u, sig_squared);
+    double rho = params.learning_rate() * eval_gaussian(X, row, col, k);
 
-    u = (1.0-p)*u + p*X;
-    sig_squared = (1.0-p)*sig_squared + p*norm_sq(X - u);
-    mu[row][col][k] = u;
-    covar[row][col][k] = sig_squared;
-    //for the best match, w = (1-alpha)*w + alpha
-    pr[row][col][k] = (1.0 -params.learning_rate())*pr[row][col][k] + ((double)is_match)*params.learning_rate();
+    mu[row][col][k] = (1.0 - rho) * mu[row][col][k] + rho * X;
+
+    covar[row][col][k] = (1.0 - rho) * covar[row][col][k] + rho * norm(X - mu[row][col][k] , NORM_L2SQR);
 }
 
 void replace_gaussian(Vec3d X, int row, int col, int k){
     mu[row][col][k] = X;
-    covar[row][col][k] = params.init_covar();
-    pr[row][col][k] = params.init_prior();
+    covar[row][col][k] = params.init_covar()*10;
+    pr[row][col][k] = params.init_prior()/10;
 }
 
 /*
@@ -175,103 +141,133 @@ void replace_gaussian(Vec3d X, int row, int col, int k){
 */
 void normalise_prior(int row, int col){
     double s = 0.0;
-    for(int i=0;i<params.maxModes();i++){
+    for(int i = 0; i < params.maxModes(); i++){
         s += pr[row][col][i];
     }
-    if(s != 0 )
-        for(int i=0;i<params.maxModes();i++)
-            pr[row][col][i] /= s;
+    if(s == 0){
+        cout<<"Trouble at: "<< row <<" "<< col <<endl;
+        return ;
+    }
+    for(int i = 0; i < params.maxModes(); i++)
+        pr[row][col][i] /= s;
 }
 
 // Global variables
-Mat frame; //current frame
+Mat frame; //current fram
 Mat bg_frame;
 Mat fg_frame;
 
 
+void update_prior(int y, int x, int match){
+    for(int i = 0; i < params.maxModes(); i++){
+        pr[y][x][i] = (1.0 - params.learning_rate()) * pr[y][x][i];
+        if(i == match)
+            pr[y][x][i] += params.learning_rate();
+    }
+    normalise_prior(y,x);
+}
+
+
+bool compare_pr(const pair<double,double> &i, const pair<double,double> &j){
+    return i.second > j.second;
+}
+
+void sort_model(int y, int x){
+        vector<pair<Vec3f,double> > mu_values(params.maxModes());
+        vector<pair<double,double> > pr_values(params.maxModes());
+        vector<pair<double,double> > covar_values(params.maxModes());
+
+        for(int i=0;i<params.maxModes();i++){
+            mu_values[i] = make_pair(mu[y][x][i], pr[y][x][i] / sqrt(covar[y][x][i]));
+            pr_values[i] = make_pair(pr[y][x][i], pr[y][x][i] / sqrt(covar[y][x][i]));
+            covar_values[i] = make_pair(covar[y][x][i], pr[y][x][i] / sqrt(covar[y][x][i]));
+        }
+        sort(mu_values.begin(), mu_values.end(), Compare);
+        sort(pr_values.begin(), pr_values.end(), compare_pr);
+        sort(covar_values.begin(),covar_values.end(), compare_pr);
+
+        for(int i=0; i < params.maxModes(); i++){
+            mu[y][x][i] = mu_values[i].first;
+            pr[y][x][i] = pr_values[i].first;
+            covar[y][x][i] = covar_values[i].first;
+        }
+
+}
+
+void create_model(int y, int x, int found){
+    // find B = argmin_i s.t. sum_i pr(i) > T
+    double sum = 0;
+    Vec3d new_3d = Vec3d(0.0,0.0,0.0);
+    for( int i=0; i < params.maxModes(); i++){
+        sum += pr[y][x][i];
+        new_3d += pr[y][x][i] * mu[y][x][i];
+        if(sum > params.threshold()){
+            break;
+        }
+    }
+
+    bg_frame.at<Vec3b>(y,x) = Vec3b(new_3d/sum);
+    if(found){
+        fg_frame.at<Vec3b>(y,x) = Vec3b(0,0,0);
+    }
+    else{
+        fg_frame.at<Vec3b>(y,x) = Vec3b(255,255,255);
+    }
+}
+
+bool check_match(Vec3d X, int row, int col, int k){
+
+    double ns1 = norm(X - mu[row][col][k], NORM_INF);
+    double sig = 2.5*sqrt(covar[row][col][k]);
+    if(ns1 < sig){                                     // L- inf norm. <  2.5 * sqrt(covar)
+        return true;
+    }
+    return false;
+}
+
 /*
 * Perform the following at each pixel (y,x) y-> row, x -> col
 */
-void perform_pixel(int y, int x){
-    Vec3b value = frame.at<Vec3b>(y,x);                         // i.e. X(t)
-    // Find the distribution that matches the current value.
-    Vec3d intensity = convert_3b_to_3d(value);
-    int worst_distr = 0,worst = 1;
+void perform_pixel(int y,int x){
+
+    Vec3b value = frame.at<Vec3b>(y,x);
+
+    Vec3d X = Vec3d(value);
     bool found = false;
-    double min_dist_square = 1000000;
     int match = -1;
-    for(int i=0;i<params.maxModes();i++){                                       // Checking against each Gaussian
-        Vec3d vec = dabs(intensity - mu[y][x][i]);
-        double dist = min_val(vec);
-        double thres = 2.5 * sqrt(covar[y][x][i]);                              // max allowed = 2.5 *sig.
-        if( dist < thres ){
+    for(int i=0;i<params.maxModes();i++){
+        if(check_match(X,y,x,i)){
             found = true;
             match = i;
-            update_gaussian(intensity,y,x,i,true);
+            // update gaussian to which the pixel matches.
+            update_prior(y,x,match);
+            update_gaussian(X, y,x,match);
+            break;
         }
-        else{
-            update_gaussian(intensity,y,x,i);                                   // do not add alpha to the other gaussians
-        }
+    }
+    if(found){
+        // no need to sort if not found a match. No gaussians shall be disturbed.
+        sort_model(y,x);
     }
     if(!found){
-        // We need to replace a Gaussian now.
-        Vec3d vec;
-        double dist;
-        for(int i=0;i<params.maxModes();i++){
-            vec = dabs(intensity - mu[y][x][i]);
-//            dist = norm(vec,NORM_INF);
-            dist  = pr[y][x][i];
-            if(dist < worst){
-                worst = dist;
-                worst_distr = i;
-            }
-        }
-        replace_gaussian(intensity,y,x,worst_distr);
-        normalise_prior(y,x);
-    }
-    vector<pair<double,double> > gaus(params.maxModes());
 
-    for(int i=0;i<params.maxModes();i++){
-        gaus[i] = make_pair( pr[y][x][i]/sqrt(covar[y][x][i]) , i);             // sort Gaussians wrt w/sigma, identifier used
-                                                                                // is the index of that Gaussian
-    }
-    sort(gaus.begin(), gaus.end(), Compare);
-
-    float sum = 0;
-    int B;
-    for(B=0;B<params.maxModes();B++){
-        sum += gaus[B].first * sqrt(covar[y][x][(int)gaus[B].second]);
-        if(sum > params.threshold())    break;
+        // replace the gaussian with min significant (significant = pr/sqrt(covar)) -> replace the last gaussian.
+        match = params.maxModes() - 1;
+        replace_gaussian(X,y,x,match);
+        update_prior(y,x,match);
     }
 
-    double prior_sum = 0.0;
 
-    Vec3d temp_3d = Vec3d(0,0,0);int pos;
-    for(int j=0;j<=B;j++){
-        pos = gaus[j].second;
-        temp_3d += pr[y][x][pos]*mu[y][x][pos];
-        prior_sum += pr[y][x][pos];
-    }
-    temp_3d /= prior_sum;
-    bg_frame.at<Vec3b>(y,x) = convert_3d_to_3b(temp_3d);
-    if(!found){
-        fg_frame.at<Vec3b>(y,x) = Vec3b(255,255,255);
-    }else{
-        fg_frame.at<Vec3b>(y,x) = Vec3b(0,0,0);
-    }
-    if(B<4){
-//        cout<<y<<" "<<x<<endl;
-    }
-    if(x == 100 and y == 100){
-//        cout<<B<<"\t"<<prior_sum<<endl;
-//        cout<<value<<" "<<found<<": "<<match<<" "<<mu[y][x][3]<<"\t"<<B<<endl;
-    }
+    create_model(y,x,found);
+
 }
 
 int main(int argc, char** argv ){
     char keyboard; //input from keyboard
-    string vid_loc = "video/umcp.mpg";
-    VideoCapture capture = processVideo(vid_loc);
+    string vid_loc = "video/test.mp4";
+    VideoCapture capture;
+    capture.release();
+    capture = processVideo(vid_loc);
     keyboard = 0;
     double w = capture.get(CV_CAP_PROP_FRAME_WIDTH);
     double h = capture.get(CV_CAP_PROP_FRAME_HEIGHT);
@@ -281,8 +277,7 @@ int main(int argc, char** argv ){
     bg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
     fg_frame = Mat(params.getRows(), params.getCols(), CV_8UC3);
     // the main while loop inside which the video processing happens
-    while( keyboard != 'q' && keyboard != 27 ){
-
+    while( keyboard != 'q' and keyboard != 27 ){
         //read the current frame
         if(!capture.read(frame)) {
             cerr << "Unable to read next frame." << endl;
@@ -298,15 +293,12 @@ int main(int argc, char** argv ){
                 perform_pixel(y,x);
             }
         }
-
-        //The output area -- output video and whatever else we want
-        //get the frame number and write it on the current frame
         imshow("Original", frame);
         imshow("Foreground", fg_frame);
         imshow("Background", bg_frame);
 
         //get the input from the keyboard
-        keyboard = (char)waitKey( 30 );
+        keyboard = (char)waitKey( 1 );
     }
 
 
